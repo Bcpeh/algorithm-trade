@@ -1,3 +1,6 @@
 alpaca_trade_api
 arch
 matplotlib
+scikit-learn
+tensorflow
+nltk
