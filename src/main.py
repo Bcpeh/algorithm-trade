@@ -1,66 +1,46 @@
-import requests
 import json
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+from arch import arch_model
+import alpaca_trade_api as tradeapi
+from datetime import datetime
 
 # Replace with your own API key and secret
-with open('secrets.json') as f:
+with open('secrets/secrets.json') as f:
     secrets = json.load(f)
 API_KEY = secrets['KEY']
 API_SECRET = secrets['SECRET']
 BASE_URL = 'https://paper-api.alpaca.markets'  # For paper trading, use the paper trading URL
 
-
-# Function to get the account information
-def get_account():
-    url = f'{BASE_URL}/v2/account'
-    headers = {
-        'APCA-API-KEY-ID': API_KEY,
-        'APCA-API-SECRET-KEY': API_SECRET
-    }
-
-    response = requests.get(url, headers=headers, verify=False)
-    return json.loads(response.content)
-
-
-# Function to get the stock's latest trading price
-def get_latest_trade(symbol):
-    url = f'{BASE_URL}/v2/stocks/{symbol}/trades/latest'
-    headers = {
-        'APCA-API-KEY-ID': API_KEY,
-        'APCA-API-SECRET-KEY': API_SECRET
-    }
-
-    response = requests.get(url, headers=headers)
-    return json.loads(response.content)
-
-
-# Function to get the stock's historical trading prices
-def get_historical_prices(symbol, timeframe, start_date, end_date):
-    url = f'{BASE_URL}/v2/stocks/{symbol}/bars'
-    headers = {
-        'APCA-API-KEY-ID': API_KEY,
-        'APCA-API-SECRET-KEY': API_SECRET
-    }
-
-    params = {
-        'timeframe': timeframe,
-        'start': start_date,
-        'end': end_date
-    }
-
-    response = requests.get(url, headers=headers, params=params)
-    return json.loads(response.content)
-
-
+# Set up the Alpaca API client
+api = tradeapi.REST(API_KEY, API_SECRET, base_url=BASE_URL, api_version='v2')
 if __name__ == '__main__':
-    # Replace 'AAPL' with the symbol of the stock you want to target
-    symbol = 'AAPL'
+    # Get historical data for the S&P 500 index (using the ETF 'SPY' as a proxy)
+    symbol = 'SPY'
+    start_date = '2010-01-01'
+    end_date = '2022-12-31'
+    timeframe = '1D'
 
-    account_info = get_account()
-    print('Account Information:', account_info)
+    historical_data = api.get_bars(symbol, tradeapi.rest.TimeFrame.Day, start=start_date, end=end_date).df
 
-    latest_trade = get_latest_trade(symbol)
-    print('Latest Trade:', latest_trade)
+    # Calculate daily log returns
+    historical_data['Log_Returns'] = np.log(historical_data['close'] / historical_data['close'].shift(1))
 
-    # Replace the date range with your desired range
-    historical_prices = get_historical_prices(symbol, '1D', '2022-01-01', '2022-12-31')
-    print('Historical Prices:', historical_prices)
+    # Fit GARCH model on the log returns
+    model = arch_model(historical_data['Log_Returns'].dropna(), vol='Garch', p=1, q=1)
+    garch_fit = model.fit()
+
+    # Forecast the volatility
+    forecast = garch_fit.forecast(horizon=5)  # Forecast 5 days ahead
+    volatility_forecast = np.sqrt(forecast.variance.dropna())
+
+    # Plot the volatility forecast
+    plt.figure(figsize=(10, 5))
+    plt.plot(historical_data.index[1:], historical_data['Log_Returns'][1:], label='Log Returns')
+    plt.plot(volatility_forecast.index, volatility_forecast.values, label='Volatility Forecast', color='red')
+    plt.legend(loc='upper left')
+    plt.xlabel('Date')
+    plt.ylabel('Volatility')
+    plt.title('GARCH Model Volatility Forecast')
+    plt.show()
